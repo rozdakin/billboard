@@ -1,0 +1,194 @@
+---
+title: "Billboard top 100 from Y2K"
+author: "Roz Dakin"
+date-modified: last-modified
+format: html
+toc: true
+toc-location: left
+toc-expand: 2
+toc-title: Contents
+editor: visual
+---
+
+![A sample of Billboard-charting artists](https://i.kinja-img.com/image/upload/c_fit,q_60,w_1600/hzaqj6bgxxj64bnbxpsm.jpg){alt="Billboard-charting artists from 2000" fig-align="left" width="599"}
+
+## What was pop music like then?
+
+The billboard data that comes with tidyverse in R includes rankings for popular songs from the Billboard "Top 100" weekly chart from the year 2000. Let's explore these data. Some questions we will investigate include:
+
+-   At the song level,
+
+    -   What is a typical song's tenure on the charts?
+    -   Is there a relationship between a song's tenure and its peak rank?
+
+-   At the artist level,
+
+    -   Which artists have multiple hits?
+    -   Is there variation in popularity (song rank) even within the upper-echelon of pop stars?
+
+-   At the chart level,
+
+    -   How does turnover change throughout the year?
+    -   Does the number of fresh songs on the chart change with season?
+    -   Do some seasons have greater fluctuations in song rank than others?
+
+We'll start by queuing up tidyverse and rmarkdown packages.
+
+```{r}
+#| label: packages
+#| message: false
+library(tidyverse)
+library(rmarkdown)
+```
+
+The billboard dataset comes in wide format initially, with one row per song:
+
+```{r}
+#| label: look-data
+paged_table(billboard[1:20,])
+```
+
+## Reshape the data
+
+We'll set up a tidy dataframe, with one row per *song-rank*, and remove the NAs (where there is no rank for a given song). We will also calculate the date for each song-rank, based on the song's entry date plus the number of weeks it had been on the chart, according to the data:
+
+```{r}
+#| label: long-form
+#| results: hide
+dat <- billboard %>% pivot_longer(cols = 4:79, names_to = 'week', values_to = 'rank') %>% 
+  mutate(year_entered = year(date.entered)) %>% 
+  mutate(week_num = as.numeric(substr(week, 3, nchar(week)))) %>% 
+  mutate(date_rank = date.entered + (7 * (week_num - 1))) %>% 
+  filter(!is.na(rank))
+```
+
+```{r}
+#| label: view-dat
+paged_table(dat)
+```
+
+```{r}
+#| label: check-n
+#| include: false
+# dat # 5307 song-ranks
+length(unique(dat$track)) # 316 songs (assuming all uniquely named... let's check)
+n_artists <- length(unique(dat$artist)) # by 228 artists
+
+dat %>% 
+  select(artist, track) %>% 
+  unique() %>% 
+  filter(duplicated(track))
+
+n_songs <- dat %>% 
+  select(artist, track) %>% 
+  unite(song, artist, track) %>% 
+  filter(!duplicated(song)) %>% 
+  nrow()
+```
+
+So, we have `r n_songs` tracks by `r n_artists` artists. Somehow, Y2K had two charting tracks with the same name!
+
+```{r}
+#| label: dup-track
+#| echo: false
+dat %>% 
+  select(artist, track) %>% 
+  unique() %>% 
+  filter(track == 'Where I Wanna Be') %>% 
+  paged_table()
+```
+
+## Reality checks (hygiene)
+
+Let's get a handle on some basic checks.
+
+```{r}
+#| label: check-year
+#| echo: false
+dat %>% select(artist, track, year_entered) %>% 
+  unique() %>% 
+  group_by(year_entered) %>% tally()
+```
+
+Some of the songs in this dataset entered the ranks in the year 1999.
+
+Check the rank values to make sure they're as expected:
+
+```{r}
+#| label: check-rank-vals
+#| echo: false
+#| message: false
+dat %>% ggplot() + theme_bw() +
+  geom_histogram(aes(x = rank), binwidth = 1) +
+  labs(x = "Song's rank", y = 'Count')
+# dat %>% mutate(check = rank %in% 1:100) %>% pull(check) %>% table() # they're all integer values, good.
+```
+
+As expected, the ranks range from `r min(dat$rank)` to `r max(dat$rank)`.
+
+Let's check that the specific dates of each rank correspond to a set of discrete weekly dates, as expected for the Billboard releases (i.e., we should have a limited set of dates that correspond to a weekly release of the billboard list):
+
+```{r}
+#| label: check-release-dates
+
+dat %>% ggplot() + theme_bw() +
+  geom_bar(aes(x = date_rank), width = 0.9) + labs(y = 'Count', x = 'Date')
+
+release_dates <- dat %>% 
+  filter(!duplicated(date_rank)) %>% 
+  select(date_rank) %>%
+  arrange(date_rank) %>% 
+  mutate(interval = date_rank - lag(date_rank))
+
+release_dates %>% 
+  filter(!is.na(interval)) %>% 
+  group_by(interval) %>% 
+  tally() # all 7 days apart, as expected
+
+release_dates %>% 
+  mutate(d_of_week = wday(date_rank, label = T)) %>% # lubridate
+  group_by(d_of_week) %>% tally()
+```
+
+Confirmed. We have 97 unique (discrete) date-values that include dates in 1999, 2000, and 2001. All of the dates are 7 days apart, as expected. And we can see from this that the Billboard charts always came out on a Saturday.
+
+For every release date occurring within 2000, do we have all of the top 100 songs? We don't expect to have complete info for release dates in 1999 or 2001, but are the weekly ranks within 2000 complete?
+
+```{r}
+#| label: check-complete-and-ties
+
+release_dates_2000 <- release_dates %>% 
+  filter(year(date_rank) == 2000) %>% 
+  pull(date_rank)
+
+week_tally <- dat %>% 
+  filter(date_rank %in% release_dates_2000) %>% 
+  group_by(date_rank) %>% 
+  summarize(n_hits = n(), check_no_dup_ranks = length(unique(rank)) == n(), n_ties = sum(duplicated(rank)))
+
+paged_table(week_tally)
+```
+
+We don't! And we have duplicated ranks for a given date. Duplicated ranks could be ties in Billboard's methodology, BUT, taking a look at [archived issues of Billboard magazine](https://www.worldradiohistory.com/Archive-All-Music/Billboard-Magazine.htm#00s), I don't see ties there. Here's an example in the tidyverse data from the first week of January in 2000, zero-ing in on ranks around the presumed ties.
+
+TBD why we have ties in the data here.
+
+```{r}
+#| label: examine-ties
+#| echo: false
+
+example_ties <- dat %>% filter(date_rank == '2000-01-01') %>% 
+  select(track, rank) %>% 
+  arrange(rank) %>% 
+  mutate(is_tie = duplicated(rank)) %>% 
+  filter(is_tie == T)
+
+dat %>% filter(date_rank == '2000-01-01') %>% 
+  select(track, rank) %>% 
+  arrange(rank) %>% 
+  filter(rank %in% c(example_ties$rank, example_ties$rank - 1, example_ties$rank + 1))
+```
+
+## Song tenure
+
+Text
