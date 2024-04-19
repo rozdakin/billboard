@@ -1,12 +1,5 @@
 # billboard
-testing with billboard data
 
-adding a line
+EDA on the billboard dataset from tidyverse
 
-adding another line
-
-why no line breaks? OK they work now
-
-Now, making a change in R studio... it worked!
-
-
+This is an exploratory data analysis of billboard-charting songs from the year 2000 for students in BIOL 5404 at Carleton University.
